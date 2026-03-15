@@ -1,4 +1,4 @@
-const { createAuthedSupabaseClient } = require("../config/supabaseClient");
+const { supabase: baseSupabase, createAuthedSupabaseClient } = require("../config/supabaseClient");
 
 // Prefer users table first because this project's SQL seed/setup uses users.
 const PROFILE_TABLES = ["users", "profiles"];
@@ -488,11 +488,21 @@ const transferMoney = async (req, res) => {
     return res.status(400).json({ message: "Insufficient balance." });
   }
 
-  const recipientResult = await getRecipientByIdentifier(
+  // Try with the sender's authed client first; fall back to the base anon
+  // client so RLS on the users table doesn't hide other users' rows.
+  let recipientResult = await getRecipientByIdentifier(
     supabase,
     senderProfileResult.tableName,
     recipient
   );
+
+  if (!recipientResult.error && !recipientResult.data) {
+    recipientResult = await getRecipientByIdentifier(
+      baseSupabase,
+      senderProfileResult.tableName,
+      recipient
+    );
+  }
 
   if (recipientResult.error) {
     return res.status(500).json({ message: recipientResult.error.message });
@@ -595,9 +605,73 @@ const transferMoney = async (req, res) => {
   });
 };
 
+const depositMoney = async (req, res) => {
+  const supabase = createAuthedSupabaseClient(req.accessToken);
+  const profileResult = await getProfileWithFallback(supabase, req.user);
+
+  if (profileResult.error) {
+    return res.status(500).json({ message: profileResult.error.message });
+  }
+
+  const { amount } = req.body;
+  const parsedAmount = Number(amount);
+
+  if (Number.isNaN(parsedAmount) || parsedAmount <= 0 || parsedAmount > 1000000) {
+    return res.status(400).json({ message: "Provide an amount between 1 and 1,000,000." });
+  }
+
+  const normalizedAmount = Number(parsedAmount.toFixed(2));
+  const profile = profileResult.data;
+  const newBalance = Number((profile.balance + normalizedAmount).toFixed(2));
+  const targetTable = profileResult.tableName || "users";
+
+  let updateError = null;
+
+  if (profileResult.tableName) {
+    // Existing record — update balance
+    const result = await updateBalance(supabase, targetTable, profile.id, newBalance);
+    updateError = result.error;
+  } else {
+    // No record yet — create one for this user
+    const { error } = await supabase.from("users").upsert(
+      [{
+        id: req.user.id,
+        email: req.user.email,
+        balance: normalizedAmount,
+        name: req.user.user_metadata?.name || req.user.email?.split("@")[0] || "User",
+      }],
+      { onConflict: "id" }
+    );
+    updateError = error;
+  }
+
+  if (updateError) {
+    return res.status(500).json({ message: updateError.message });
+  }
+
+  // Best-effort transaction insert — ignore failure if table doesn't exist
+  await supabase.from("transactions").insert([
+    {
+      sender_id: profile.id,
+      receiver_id: profile.id,
+      amount: normalizedAmount,
+      transaction_type: "credit",
+      balance_after_transaction: newBalance,
+      created_at: new Date().toISOString(),
+    },
+  ]);
+
+  return res.status(200).json({
+    message: "Deposit successful.",
+    deposit: { amount: normalizedAmount, newBalance },
+    refreshedAt: new Date().toISOString(),
+  });
+};
+
 module.exports = {
   getDashboard,
   getBalance,
   getStatement,
   transferMoney,
+  depositMoney,
 };

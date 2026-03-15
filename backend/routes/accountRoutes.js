@@ -5,6 +5,7 @@ const {
   getBalance,
   getStatement,
   transferMoney,
+  depositMoney,
 } = require("../controllers/accountController");
 
 const router = express.Router();
@@ -14,5 +15,6 @@ router.get("/dashboard", getDashboard);
 router.get("/balance", getBalance);
 router.get("/statement", getStatement);
 router.post("/transfer", transferMoney);
+router.post("/deposit", depositMoney);
 
 module.exports = router;

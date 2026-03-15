@@ -64,4 +64,9 @@ export const transferMoneyRequest = async (payload) => {
   return data
 }
 
+export const depositMoneyRequest = async (payload) => {
+  const { data } = await api.post('/account/deposit', payload)
+  return data
+}
+
 export default api

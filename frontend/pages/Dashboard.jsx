@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import Navbar from '../components/Navbar'
 import { useAuth } from '../contexts/AuthContext'
-import { getDashboardRequest } from '../services/api'
+import { getDashboardRequest, depositMoneyRequest } from '../services/api'
 
 const formatCurrency = (amount) =>
   new Intl.NumberFormat('en-IN', {
@@ -46,6 +46,45 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
+
+  const [depositOpen, setDepositOpen] = useState(false)
+  const [depositAmount, setDepositAmount] = useState('')
+  const [depositLoading, setDepositLoading] = useState(false)
+  const [depositError, setDepositError] = useState('')
+  const [depositSuccess, setDepositSuccess] = useState('')
+
+  const openDeposit = () => {
+    setDepositAmount('')
+    setDepositError('')
+    setDepositSuccess('')
+    setDepositOpen(true)
+  }
+
+  const closeDeposit = () => {
+    if (depositLoading) return
+    setDepositOpen(false)
+  }
+
+  const handleDeposit = async (e) => {
+    e.preventDefault()
+    const amount = Number(depositAmount)
+    if (!depositAmount || Number.isNaN(amount) || amount <= 0) {
+      setDepositError('Enter a valid amount greater than 0.')
+      return
+    }
+    setDepositError('')
+    setDepositLoading(true)
+    try {
+      const data = await depositMoneyRequest({ amount })
+      setDepositSuccess(`Added ${formatCurrency(data.deposit.amount)} to your account!`)
+      setDashboardData((prev) => ({ ...prev, balance: data.deposit.newBalance }))
+      setDepositAmount('')
+    } catch (err) {
+      setDepositError(err?.response?.data?.message || 'Deposit failed. Try again.')
+    } finally {
+      setDepositLoading(false)
+    }
+  }
 
   const displayName =
     dashboardData.account?.fullName ||
@@ -159,7 +198,64 @@ const Dashboard = () => {
               Updated {formatTimeAgo(dashboardData.refreshedAt)}
             </p>
           ) : null}
+          <button className="add-money-btn" onClick={openDeposit} type="button">
+            + Add Money
+          </button>
         </article>
+
+        {depositOpen && (
+          <div className="deposit-overlay" onClick={closeDeposit} role="presentation">
+            <div className="deposit-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Add Money">
+              <h2 className="deposit-title">Add Money</h2>
+              <p className="deposit-subtitle">Top up your account balance instantly.</p>
+
+              {depositSuccess ? (
+                <div className="deposit-success">{depositSuccess}</div>
+              ) : null}
+
+              <form onSubmit={handleDeposit} noValidate>
+                <label className="deposit-label" htmlFor="deposit-amount">Amount (₹)</label>
+                <input
+                  id="deposit-amount"
+                  className="deposit-input"
+                  type="number"
+                  min="1"
+                  max="1000000"
+                  step="any"
+                  placeholder="e.g. 5000"
+                  value={depositAmount}
+                  onChange={(e) => { setDepositAmount(e.target.value); setDepositError('') }}
+                  disabled={depositLoading}
+                  autoFocus
+                />
+                {depositError ? <p className="deposit-error">{depositError}</p> : null}
+
+                <div className="deposit-quick-btns">
+                  {[500, 1000, 5000, 10000].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      className="deposit-quick-btn"
+                      onClick={() => { setDepositAmount(String(preset)); setDepositError('') }}
+                      disabled={depositLoading}
+                    >
+                      +₹{preset.toLocaleString('en-IN')}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="deposit-actions">
+                  <button type="button" className="deposit-cancel-btn" onClick={closeDeposit} disabled={depositLoading}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="deposit-confirm-btn" disabled={depositLoading || !depositAmount}>
+                    {depositLoading ? 'Adding...' : 'Add Money'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
         {error ? <div className="error-box dashboard-error">{error}</div> : null}
 

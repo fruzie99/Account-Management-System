@@ -1,9 +1,31 @@
-const { supabase } = require("../config/supabaseClient");
+const { supabase, createAuthedSupabaseClient } = require("../config/supabaseClient");
 
 const isValidEmail = (email) => typeof email === "string" && email.includes("@");
 
 const isValidPassword = (password) =>
   typeof password === "string" && password.length >= 6;
+
+// Creates a users table row for a newly registered user.
+const createUserRecord = async (accessToken, user) => {
+  try {
+    const authedClient = createAuthedSupabaseClient(accessToken);
+    const { error } = await authedClient.from("users").upsert(
+      [{
+        id: user.id,
+        email: user.email,
+        balance: 0,
+        name: user.user_metadata?.name || user.email.split("@")[0],
+        password: null,
+      }],
+      { onConflict: "id", ignoreDuplicates: true }
+    );
+    if (error) {
+      console.error("[createUserRecord] Failed to upsert user row:", error.message);
+    }
+  } catch (_err) {
+    console.error("[createUserRecord] Exception:", _err.message);
+  }
+};
 
 const signup = async (req, res) => {
   const { email, password } = req.body;
@@ -22,6 +44,7 @@ const signup = async (req, res) => {
 
   // With Confirm email OFF, signUp usually returns a session directly.
   if (data?.session && data?.user) {
+    await createUserRecord(data.session.access_token, data.user);
     return res.status(201).json({
       message: "Signup successful.",
       user: data.user,
@@ -51,6 +74,7 @@ const signup = async (req, res) => {
     return res.status(400).json({ message: errorMessage });
   }
 
+  await createUserRecord(signInData.session.access_token, signInData.user);
   return res.status(201).json({
     message: "Signup successful.",
     user: signInData.user,
@@ -85,6 +109,7 @@ const login = async (req, res) => {
     return res.status(401).json({ message: error.message });
   }
 
+  await createUserRecord(data.session.access_token, data.user);
   return res.status(200).json({
     message: "Login successful.",
     user: data.user,
