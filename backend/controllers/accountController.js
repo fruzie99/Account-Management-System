@@ -332,8 +332,271 @@ const getStatement = async (req, res) => {
   });
 };
 
+const isUuid = (value) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value
+  );
+
+const getRecipientByIdentifier = async (supabase, tableName, identifier) => {
+  const trimmedIdentifier = String(identifier || "").trim();
+
+  if (!trimmedIdentifier) {
+    return { data: null, error: null };
+  }
+
+  const byEmailResult = await supabase
+    .from(tableName)
+    .select("*")
+    .ilike("email", trimmedIdentifier)
+    .maybeSingle();
+
+  if (byEmailResult.error) {
+    return { data: null, error: byEmailResult.error };
+  }
+
+  if (byEmailResult.data) {
+    return { data: byEmailResult.data, error: null };
+  }
+
+  if (!isUuid(trimmedIdentifier)) {
+    return { data: null, error: null };
+  }
+
+  const byIdResult = await supabase
+    .from(tableName)
+    .select("*")
+    .eq("id", trimmedIdentifier)
+    .maybeSingle();
+
+  if (byIdResult.error) {
+    return { data: null, error: byIdResult.error };
+  }
+
+  return { data: byIdResult.data || null, error: null };
+};
+
+const updateBalance = async (supabase, tableName, profileId, nextBalance) => {
+  const { error } = await supabase
+    .from(tableName)
+    .update({ balance: nextBalance })
+    .eq("id", profileId);
+
+  return { error };
+};
+
+const insertTransferTransactions = async ({
+  supabase,
+  senderId,
+  receiverId,
+  amount,
+  senderBalanceAfter,
+  receiverBalanceAfter,
+  purpose,
+  message,
+}) => {
+  const now = new Date().toISOString();
+
+  const fullRows = [
+    {
+      sender_id: senderId,
+      receiver_id: receiverId,
+      amount,
+      transaction_type: "debit",
+      balance_after_transaction: senderBalanceAfter,
+      purpose,
+      message,
+      created_at: now,
+    },
+    {
+      sender_id: senderId,
+      receiver_id: receiverId,
+      amount,
+      transaction_type: "credit",
+      balance_after_transaction: receiverBalanceAfter,
+      purpose,
+      message,
+      created_at: now,
+    },
+  ];
+
+  const rowsWithoutPurpose = fullRows.map(
+    ({ purpose: _purpose, message: _message, ...rest }) => rest
+  );
+
+  const rowsWithoutBalanceAfter = rowsWithoutPurpose.map(
+    ({ balance_after_transaction: _balanceAfter, ...rest }) => rest
+  );
+
+  const minimalRows = rowsWithoutBalanceAfter.map(({ created_at: _createdAt, ...rest }) => rest);
+
+  const variants = [
+    fullRows,
+    rowsWithoutPurpose,
+    rowsWithoutBalanceAfter,
+    minimalRows,
+  ];
+
+  let lastError = null;
+
+  for (const rows of variants) {
+    const { error } = await supabase.from("transactions").insert(rows);
+
+    if (!error) {
+      return { error: null };
+    }
+
+    lastError = error;
+
+    if (isMissingColumnError(error)) {
+      continue;
+    }
+
+    break;
+  }
+
+  return { error: lastError };
+};
+
+const transferMoney = async (req, res) => {
+  const supabase = createAuthedSupabaseClient(req.accessToken);
+  const senderProfileResult = await getProfileWithFallback(supabase, req.user);
+
+  if (senderProfileResult.error) {
+    return res.status(500).json({ message: senderProfileResult.error.message });
+  }
+
+  if (!senderProfileResult.tableName) {
+    return res.status(400).json({
+      message: "Sender account record was not found in users/profiles table.",
+    });
+  }
+
+  const { recipient, amount, purpose, message } = req.body;
+  const parsedAmount = Number(amount);
+
+  if (!recipient || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+    return res.status(400).json({
+      message: "Provide a valid recipient and amount greater than 0.",
+    });
+  }
+
+  const sender = senderProfileResult.data;
+  const normalizedAmount = Number(parsedAmount.toFixed(2));
+
+  if (sender.balance < normalizedAmount) {
+    return res.status(400).json({ message: "Insufficient balance." });
+  }
+
+  const recipientResult = await getRecipientByIdentifier(
+    supabase,
+    senderProfileResult.tableName,
+    recipient
+  );
+
+  if (recipientResult.error) {
+    return res.status(500).json({ message: recipientResult.error.message });
+  }
+
+  if (!recipientResult.data) {
+    return res.status(404).json({
+      message: "Receiver is not a registered user in this application.",
+    });
+  }
+
+  const receiver = normalizeProfile(recipientResult.data, req.user);
+
+  if (receiver.id === sender.id) {
+    return res.status(400).json({
+      message: "You cannot transfer money to your own account.",
+    });
+  }
+
+  const senderBalanceAfter = Number((sender.balance - normalizedAmount).toFixed(2));
+  const receiverBalanceAfter = Number(
+    (receiver.balance + normalizedAmount).toFixed(2)
+  );
+
+  const senderUpdateResult = await updateBalance(
+    supabase,
+    senderProfileResult.tableName,
+    sender.id,
+    senderBalanceAfter
+  );
+
+  if (senderUpdateResult.error) {
+    return res.status(500).json({ message: senderUpdateResult.error.message });
+  }
+
+  const receiverUpdateResult = await updateBalance(
+    supabase,
+    senderProfileResult.tableName,
+    receiver.id,
+    receiverBalanceAfter
+  );
+
+  if (receiverUpdateResult.error) {
+    await updateBalance(
+      supabase,
+      senderProfileResult.tableName,
+      sender.id,
+      sender.balance
+    );
+
+    return res.status(500).json({ message: receiverUpdateResult.error.message });
+  }
+
+  const transactionResult = await insertTransferTransactions({
+    supabase,
+    senderId: sender.id,
+    receiverId: receiver.id,
+    amount: normalizedAmount,
+    senderBalanceAfter,
+    receiverBalanceAfter,
+    purpose: typeof purpose === "string" ? purpose.trim() : "Payment",
+    message: typeof message === "string" ? message.trim() : null,
+  });
+
+  if (transactionResult.error) {
+    await updateBalance(
+      supabase,
+      senderProfileResult.tableName,
+      sender.id,
+      sender.balance
+    );
+    await updateBalance(
+      supabase,
+      senderProfileResult.tableName,
+      receiver.id,
+      receiver.balance
+    );
+
+    if (isMissingRelationError(transactionResult.error)) {
+      return res.status(500).json({
+        message:
+          "Transactions table not found. Create the transactions table before transferring.",
+      });
+    }
+
+    return res.status(500).json({ message: transactionResult.error.message });
+  }
+
+  return res.status(200).json({
+    message: "Transfer successful.",
+    transfer: {
+      amount: normalizedAmount,
+      senderBalance: senderBalanceAfter,
+      receiverBalance: receiverBalanceAfter,
+      receiverName: receiver.fullName || receiver.email || "Receiver",
+      purpose: typeof purpose === "string" ? purpose.trim() || "Payment" : "Payment",
+      message: typeof message === "string" ? message.trim() : "",
+    },
+    refreshedAt: new Date().toISOString(),
+  });
+};
+
 module.exports = {
   getDashboard,
   getBalance,
   getStatement,
+  transferMoney,
 };

@@ -54,4 +54,14 @@ export const getStatementRequest = async () => {
   return data
 }
 
+export const getBalanceRequest = async () => {
+  const { data } = await api.get('/account/balance')
+  return data
+}
+
+export const transferMoneyRequest = async (payload) => {
+  const { data } = await api.post('/account/transfer', payload)
+  return data
+}
+
 export default api
