@@ -481,6 +481,123 @@ body {
   padding: 20px 28px 24px;
 }
 
+.statement-screen {
+  min-height: 100vh;
+}
+
+.statement-page {
+  width: min(100%, 1320px);
+  min-height: calc(100vh - 90px);
+  margin: 0 auto;
+  padding: 20px 28px 24px;
+  display: grid;
+  gap: 14px;
+}
+
+.statement-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.statement-header h1 {
+  margin: 0;
+  font-size: 2rem;
+}
+
+.statement-header p {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+
+.statement-table-wrap {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #ffffff;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.statement-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.statement-table {
+  width: 100%;
+  min-width: 920px;
+  border-collapse: collapse;
+}
+
+.statement-table thead {
+  background: #edf4fb;
+}
+
+.statement-table th,
+.statement-table td {
+  padding: 12px 14px;
+  text-align: left;
+  border-bottom: 1px solid #e3e9f2;
+  font-size: 0.92rem;
+}
+
+.statement-table th {
+  color: #1a385d;
+  font-size: 0.84rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.statement-table tbody tr:hover {
+  background: #f8fbff;
+}
+
+.statement-type {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 68px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 5px 10px;
+}
+
+.statement-type.credit {
+  background: #e5faef;
+  color: #0f7a43;
+}
+
+.statement-type.debit {
+  background: #ffe7e7;
+  color: #a42d2d;
+}
+
+.statement-amount {
+  font-weight: 700;
+}
+
+.statement-amount.credit {
+  color: #0f7a43;
+}
+
+.statement-amount.debit {
+  color: #a42d2d;
+}
+
+.statement-empty {
+  margin: 0;
+  padding: 18px;
+  color: var(--muted);
+}
+
+.statement-updated {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
 .send-money-screen {
   min-height: 100vh;
 }
@@ -666,6 +783,15 @@ body {
     padding: 16px 14px 18px;
   }
 
+  .statement-page {
+    padding: 16px 14px 18px;
+  }
+
+  .statement-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .send-money-page {
     padding: 16px 14px 18px;
   }
@@ -700,6 +826,20 @@ body {
   .blank-page {
     padding: 14px 10px 16px;
     gap: 10px;
+  }
+
+  .statement-page {
+    padding: 14px 10px 16px;
+    gap: 10px;
+  }
+
+  .statement-header h1 {
+    font-size: 1.7rem;
+  }
+
+  .statement-table th,
+  .statement-table td {
+    padding: 10px 11px;
   }
 
   .send-money-page {

@@ -1,6 +1,7 @@
 const { createAuthedSupabaseClient } = require("../config/supabaseClient");
 
-const PROFILE_TABLES = ["profiles", "users"];
+// Prefer users table first because this project's SQL seed/setup uses users.
+const PROFILE_TABLES = ["users", "profiles"];
 
 const isMissingRelationError = (error) => {
   const message = (error?.message || "").toLowerCase();
