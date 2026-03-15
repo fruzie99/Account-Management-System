@@ -34,6 +34,5 @@ app.use((err, _req, res, _next) => {
 });
 
 app.listen(port, () => {
-	// Keep startup output simple for local development.
 	console.log(`Server running on http://localhost:${port}`);
 });

@@ -5,8 +5,19 @@ const isValidEmail = (email) => typeof email === "string" && email.includes("@")
 const isValidPassword = (password) =>
   typeof password === "string" && password.length >= 6;
 
-// Creates a users table row for a newly registered user.
-const createUserRecord = async (accessToken, user) => {
+const isEmailConfirmationError = (message) =>
+  String(message || "").toLowerCase().includes("email not confirmed");
+
+const getUserName = (user) => {
+  const emailPrefix = String(user?.email || "").split("@")[0];
+  return user?.user_metadata?.name || emailPrefix || "User";
+};
+
+const ensureUserRecord = async (accessToken, user) => {
+  if (!accessToken || !user?.id || !user?.email) {
+    return;
+  }
+
   try {
     const authedClient = createAuthedSupabaseClient(accessToken);
     const { error } = await authedClient.from("users").upsert(
@@ -14,16 +25,17 @@ const createUserRecord = async (accessToken, user) => {
         id: user.id,
         email: user.email,
         balance: 0,
-        name: user.user_metadata?.name || user.email.split("@")[0],
+        name: getUserName(user),
         password: null,
       }],
       { onConflict: "id", ignoreDuplicates: true }
     );
+
     if (error) {
-      console.error("[createUserRecord] Failed to upsert user row:", error.message);
+      console.error("[ensureUserRecord] Failed to upsert user row:", error.message);
     }
-  } catch (_err) {
-    console.error("[createUserRecord] Exception:", _err.message);
+  } catch (error) {
+    console.error("[ensureUserRecord] Exception:", error.message);
   }
 };
 
@@ -36,49 +48,46 @@ const signup = async (req, res) => {
     });
   }
 
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+    email,
+    password,
+  });
 
-  if (error) {
-    return res.status(400).json({ message: error.message });
+  if (signUpError) {
+    return res.status(400).json({ message: signUpError.message });
   }
 
-  // With Confirm email OFF, signUp usually returns a session directly.
-  if (data?.session && data?.user) {
-    await createUserRecord(data.session.access_token, data.user);
-    return res.status(201).json({
-      message: "Signup successful.",
-      user: data.user,
-      session: data.session,
-    });
-  }
+  let authData = signUpData;
 
-  // If no session comes back, attempt sign-in so registration can still
-  // behave like immediate login when project settings allow it.
-  const { data: signInData, error: signInError } =
-    await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-  if (signInError) {
-    const errorMessage =
-      signInError.message || "Unable to sign in after signup.";
-
-    if (errorMessage.toLowerCase().includes("email not confirmed")) {
-      return res.status(403).json({
-        message:
-          "Email confirmation is still enabled in Supabase. Turn off Confirm email and save changes.",
+  if (!authData?.session || !authData?.user) {
+    const { data: signInData, error: signInError } =
+      await supabase.auth.signInWithPassword({
+        email,
+        password,
       });
+
+    if (signInError) {
+      const errorMessage =
+        signInError.message || "Unable to sign in after signup.";
+
+      if (isEmailConfirmationError(errorMessage)) {
+        return res.status(403).json({
+          message:
+            "Email confirmation is still enabled in Supabase. Turn off Confirm email and save changes.",
+        });
+      }
+
+      return res.status(400).json({ message: errorMessage });
     }
 
-    return res.status(400).json({ message: errorMessage });
+    authData = signInData;
   }
 
-  await createUserRecord(signInData.session.access_token, signInData.user);
+  await ensureUserRecord(authData.session?.access_token, authData.user);
   return res.status(201).json({
     message: "Signup successful.",
-    user: signInData.user,
-    session: signInData.session,
+    user: authData.user,
+    session: authData.session,
   });
 };
 
@@ -99,7 +108,7 @@ const login = async (req, res) => {
   if (error) {
     const errorMessage = error.message || "Unable to login.";
 
-    if (errorMessage.toLowerCase().includes("email not confirmed")) {
+    if (isEmailConfirmationError(errorMessage)) {
       return res.status(401).json({
         message:
           "Email not confirmed. Turn off Confirm email in Supabase, then create a fresh account.",
@@ -109,7 +118,7 @@ const login = async (req, res) => {
     return res.status(401).json({ message: error.message });
   }
 
-  await createUserRecord(data.session.access_token, data.user);
+  await ensureUserRecord(data.session?.access_token, data.user);
   return res.status(200).json({
     message: "Login successful.",
     user: data.user,

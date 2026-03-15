@@ -1,13 +1,18 @@
 const { supabase: baseSupabase, createAuthedSupabaseClient } = require("../config/supabaseClient");
 
-// Prefer users table first because this project's SQL seed/setup uses users.
 const PROFILE_TABLES = ["users", "profiles"];
+const DEFAULT_PURPOSE = "Payment";
+const MAX_DEPOSIT_AMOUNT = 1_000_000;
+
+const cleanText = (value) =>
+  typeof value === "string" ? value.trim() : "";
+
+const toMoney = (value) => Number(Number(value || 0).toFixed(2));
 
 const isMissingRelationError = (error) => {
   const code = String(error?.code || "").toUpperCase();
   const message = (error?.message || "").toLowerCase();
 
-  // Postgres and PostgREST table/relation-not-found codes.
   if (code === "42P01" || code === "PGRST205") {
     return true;
   }
@@ -24,7 +29,6 @@ const isMissingColumnError = (error) => {
   const code = String(error?.code || "").toUpperCase();
   const message = (error?.message || "").toLowerCase();
 
-  // Postgres and PostgREST column-not-found codes.
   if (code === "42703" || code === "PGRST204") {
     return true;
   }
@@ -231,6 +235,19 @@ const getParticipantMap = async (supabase, transactions, preferredTableName) => 
   return { data: new Map(), error: null };
 };
 
+const pickLatestBalanceAfterTransaction = (transactions) => {
+  for (const item of transactions || []) {
+    if (
+      item?.balance_after_transaction !== null &&
+      item?.balance_after_transaction !== undefined
+    ) {
+      return toNumber(item.balance_after_transaction);
+    }
+  }
+
+  return null;
+};
+
 const mapTransaction = (item, currentUserId, profileMap) => {
   const sender = profileMap.get(item.sender_id);
   const receiver = profileMap.get(item.receiver_id);
@@ -291,13 +308,30 @@ const getDashboard = async (req, res) => {
     mapTransaction(item, userId, participantResult.data)
   );
 
+  const currentBalance = toNumber(profileResult.data.balance);
+  const latestBalance = pickLatestBalanceAfterTransaction(transactionResult.data);
+  const resolvedBalance =
+    currentBalance === 0 && latestBalance !== null ? latestBalance : currentBalance;
+
+  if (
+    profileResult.tableName &&
+    resolvedBalance !== currentBalance
+  ) {
+    await updateBalance(
+      supabase,
+      profileResult.tableName,
+      profileResult.data.id,
+      resolvedBalance
+    );
+  }
+
   return res.status(200).json({
     account: {
       id: profileResult.data.id,
       email: profileResult.data.email,
       fullName: profileResult.data.fullName,
     },
-    balance: toNumber(profileResult.data.balance),
+    balance: resolvedBalance,
     recentActivity,
     refreshedAt: new Date().toISOString(),
   });
@@ -305,14 +339,45 @@ const getDashboard = async (req, res) => {
 
 const getBalance = async (req, res) => {
   const supabase = createAuthedSupabaseClient(req.accessToken);
+  const userId = req.user.id;
   const profileResult = await getProfileWithFallback(supabase, req.user);
 
   if (profileResult.error) {
     return res.status(500).json({ message: profileResult.error.message });
   }
 
+  const currentBalance = toNumber(profileResult.data.balance);
+
+  if (currentBalance !== 0) {
+    return res.status(200).json({
+      balance: currentBalance,
+      refreshedAt: new Date().toISOString(),
+    });
+  }
+
+  const transactionResult = await getRawTransactions(supabase, userId, 25);
+
+  if (transactionResult.error) {
+    return res.status(500).json({ message: transactionResult.error.message });
+  }
+
+  const latestBalance = pickLatestBalanceAfterTransaction(transactionResult.data);
+  const resolvedBalance = latestBalance === null ? currentBalance : latestBalance;
+
+  if (
+    profileResult.tableName &&
+    resolvedBalance !== currentBalance
+  ) {
+    await updateBalance(
+      supabase,
+      profileResult.tableName,
+      profileResult.data.id,
+      resolvedBalance
+    );
+  }
+
   return res.status(200).json({
-    balance: toNumber(profileResult.data.balance),
+    balance: resolvedBalance,
     refreshedAt: new Date().toISOString(),
   });
 };
@@ -502,14 +567,12 @@ const transferMoney = async (req, res) => {
   }
 
   const sender = senderProfileResult.data;
-  const normalizedAmount = Number(parsedAmount.toFixed(2));
+  const normalizedAmount = toMoney(parsedAmount);
 
   if (sender.balance < normalizedAmount) {
     return res.status(400).json({ message: "Insufficient balance." });
   }
 
-  // Try with the sender's authed client first; fall back to the base anon
-  // client so RLS on the users table doesn't hide other users' rows.
   let recipientResult = await getRecipientByIdentifier(
     supabase,
     senderProfileResult.tableName,
@@ -542,10 +605,11 @@ const transferMoney = async (req, res) => {
     });
   }
 
-  const senderBalanceAfter = Number((sender.balance - normalizedAmount).toFixed(2));
-  const receiverBalanceAfter = Number(
-    (receiver.balance + normalizedAmount).toFixed(2)
-  );
+  const senderBalanceAfter = toMoney(sender.balance - normalizedAmount);
+  const receiverBalanceAfter = toMoney(receiver.balance + normalizedAmount);
+
+  const normalizedPurpose = cleanText(purpose) || DEFAULT_PURPOSE;
+  const normalizedMessage = cleanText(message);
 
   const senderUpdateResult = await updateBalance(
     supabase,
@@ -583,8 +647,8 @@ const transferMoney = async (req, res) => {
     amount: normalizedAmount,
     senderBalanceAfter,
     receiverBalanceAfter,
-    purpose: typeof purpose === "string" ? purpose.trim() : "Payment",
-    message: typeof message === "string" ? message.trim() : null,
+    purpose: normalizedPurpose,
+    message: normalizedMessage || null,
   });
 
   if (transactionResult.error) {
@@ -618,8 +682,8 @@ const transferMoney = async (req, res) => {
       senderBalance: senderBalanceAfter,
       receiverBalance: receiverBalanceAfter,
       receiverName: receiver.fullName || receiver.email || "Receiver",
-      purpose: typeof purpose === "string" ? purpose.trim() || "Payment" : "Payment",
-      message: typeof message === "string" ? message.trim() : "",
+      purpose: normalizedPurpose,
+      message: normalizedMessage,
     },
     refreshedAt: new Date().toISOString(),
   });
@@ -636,29 +700,32 @@ const depositMoney = async (req, res) => {
   const { amount } = req.body;
   const parsedAmount = Number(amount);
 
-  if (Number.isNaN(parsedAmount) || parsedAmount <= 0 || parsedAmount > 1000000) {
+  if (
+    Number.isNaN(parsedAmount) ||
+    parsedAmount <= 0 ||
+    parsedAmount > MAX_DEPOSIT_AMOUNT
+  ) {
     return res.status(400).json({ message: "Provide an amount between 1 and 1,000,000." });
   }
 
-  const normalizedAmount = Number(parsedAmount.toFixed(2));
+  const normalizedAmount = toMoney(parsedAmount);
   const profile = profileResult.data;
-  const newBalance = Number((profile.balance + normalizedAmount).toFixed(2));
+  const newBalance = toMoney(profile.balance + normalizedAmount);
   const targetTable = profileResult.tableName || "users";
 
   let updateError = null;
 
   if (profileResult.tableName) {
-    // Existing record — update balance
     const result = await updateBalance(supabase, targetTable, profile.id, newBalance);
     updateError = result.error;
   } else {
-    // No record yet — create one for this user
     const { error } = await supabase.from("users").upsert(
       [{
         id: req.user.id,
         email: req.user.email,
         balance: normalizedAmount,
         name: req.user.user_metadata?.name || req.user.email?.split("@")[0] || "User",
+        password: null,
       }],
       { onConflict: "id" }
     );
@@ -669,7 +736,6 @@ const depositMoney = async (req, res) => {
     return res.status(500).json({ message: updateError.message });
   }
 
-  // Best-effort transaction insert — ignore failure if table doesn't exist
   await supabase.from("transactions").insert([
     {
       sender_id: profile.id,
