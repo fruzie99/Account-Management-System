@@ -4,17 +4,37 @@ const { supabase: baseSupabase, createAuthedSupabaseClient } = require("../confi
 const PROFILE_TABLES = ["users", "profiles"];
 
 const isMissingRelationError = (error) => {
+  const code = String(error?.code || "").toUpperCase();
   const message = (error?.message || "").toLowerCase();
+
+  // Postgres and PostgREST table/relation-not-found codes.
+  if (code === "42P01" || code === "PGRST205") {
+    return true;
+  }
+
   return (
-    message.includes("relation") ||
-    message.includes("does not exist") ||
-    message.includes("schema cache")
+    (message.includes("relation") && message.includes("does not exist")) ||
+    (message.includes("table") &&
+      message.includes("schema cache") &&
+      message.includes("could not find"))
   );
 };
 
 const isMissingColumnError = (error) => {
+  const code = String(error?.code || "").toUpperCase();
   const message = (error?.message || "").toLowerCase();
-  return message.includes("column") && message.includes("does not exist");
+
+  // Postgres and PostgREST column-not-found codes.
+  if (code === "42703" || code === "PGRST204") {
+    return true;
+  }
+
+  return (
+    (message.includes("column") && message.includes("does not exist")) ||
+    (message.includes("column") &&
+      message.includes("schema cache") &&
+      message.includes("could not find"))
+  );
 };
 
 const isSkippableTableError = (error) =>
