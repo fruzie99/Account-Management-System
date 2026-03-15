@@ -49,66 +49,68 @@ const Signup = () => {
   }
 
   return (
-    <section className="auth-card">
-      <h1 className="auth-title">Welcome</h1>
-      <p className="auth-subtitle">Create your account.</p>
+    <div className="auth-screen">
+      <section className="auth-card">
+        <h1 className="auth-title">Welcome</h1>
+        <p className="auth-subtitle">Create your account.</p>
 
-      {error ? <div className="error-box">{error}</div> : null}
+        {error ? <div className="error-box">{error}</div> : null}
 
-      <form onSubmit={handleSubmit} className="auth-form">
-        <div className="form-group">
-          <label htmlFor="signup-email">Email Address</label>
-          <input
-            id="signup-email"
-            className="input-field"
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="you@example.com"
-            required
-          />
-        </div>
+        <form onSubmit={handleSubmit} className="auth-form">
+          <div className="form-group">
+            <label htmlFor="signup-email">Email Address</label>
+            <input
+              id="signup-email"
+              className="input-field"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="you@example.com"
+              required
+            />
+          </div>
 
-        <div className="form-group">
-          <label htmlFor="signup-password">Password</label>
-          <input
-            id="signup-password"
-            className="input-field"
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="At least 6 characters"
-            minLength={6}
-            required
-          />
-        </div>
+          <div className="form-group">
+            <label htmlFor="signup-password">Password</label>
+            <input
+              id="signup-password"
+              className="input-field"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="At least 6 characters"
+              minLength={6}
+              required
+            />
+          </div>
 
-        <div className="form-group">
-          <label htmlFor="signup-confirm-password">Confirm Password</label>
-          <input
-            id="signup-confirm-password"
-            className="input-field"
-            type="password"
-            value={confirmPassword}
-            onChange={(event) => setConfirmPassword(event.target.value)}
-            placeholder="Re-enter your password"
-            minLength={6}
-            required
-          />
-        </div>
+          <div className="form-group">
+            <label htmlFor="signup-confirm-password">Confirm Password</label>
+            <input
+              id="signup-confirm-password"
+              className="input-field"
+              type="password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              placeholder="Re-enter your password"
+              minLength={6}
+              required
+            />
+          </div>
 
-        <button className="auth-button" type="submit" disabled={loading}>
-          {loading ? 'Creating account...' : 'Sign Up'}
-        </button>
-      </form>
+          <button className="auth-button" type="submit" disabled={loading}>
+            {loading ? 'Creating account...' : 'Sign Up'}
+          </button>
+        </form>
 
-      <p className="auth-footer">
-        Already have an account?{' '}
-        <Link className="auth-link" to="/login">
-          Log In
-        </Link>
-      </p>
-    </section>
+        <p className="auth-footer">
+          Already have an account?{' '}
+          <Link className="auth-link" to="/login">
+            Log In
+          </Link>
+        </p>
+      </section>
+    </div>
   )
 }
 

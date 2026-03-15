@@ -19,4 +19,21 @@ const supabase = createClient(supabaseUrl, supabasePublishableKey, {
   },
 });
 
-module.exports = { supabase };
+const createAuthedSupabaseClient = (accessToken) => {
+  return createClient(supabaseUrl, supabasePublishableKey, {
+    global: {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
+};
+
+module.exports = {
+  supabase,
+  createAuthedSupabaseClient,
+};

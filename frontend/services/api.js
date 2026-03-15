@@ -7,6 +7,33 @@ const api = axios.create({
   },
 })
 
+const AUTH_STORAGE_KEY = 'auth_data'
+
+const getAccessToken = () => {
+  try {
+    const raw = localStorage.getItem(AUTH_STORAGE_KEY)
+
+    if (!raw) {
+      return ''
+    }
+
+    const parsed = JSON.parse(raw)
+    return parsed?.session?.access_token || ''
+  } catch (_error) {
+    return ''
+  }
+}
+
+api.interceptors.request.use((config) => {
+  const token = getAccessToken()
+
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+
+  return config
+})
+
 export const signupRequest = async (payload) => {
   const { data } = await api.post('/auth/signup', payload)
   return data
@@ -14,6 +41,16 @@ export const signupRequest = async (payload) => {
 
 export const loginRequest = async (payload) => {
   const { data } = await api.post('/auth/login', payload)
+  return data
+}
+
+export const getDashboardRequest = async () => {
+  const { data } = await api.get('/account/dashboard')
+  return data
+}
+
+export const getStatementRequest = async () => {
+  const { data } = await api.get('/account/statement')
   return data
 }
 
